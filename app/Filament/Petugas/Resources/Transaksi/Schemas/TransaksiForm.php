@@ -10,6 +10,7 @@ use App\Models\Transaksi;
 use App\Models\Kendaraan;
 use App\Models\TarifParkir;
 use App\Models\AreaParkir;
+use Filament\Forms\Components\Hidden;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
 
@@ -21,28 +22,30 @@ class TransaksiForm
             ->components([
 
                 Select::make('id_kendaraan')
-    ->label('Kendaraan')
-    ->options(function () {
-        // Ambil id kendaraan yang sedang aktif parkir (status masuk)
-        $kendaraanAktif = Transaksi::where('status', 'masuk')
-            ->pluck('id_kendaraan');
+                    ->label('Kendaraan')
+                    ->options(function () {
+                        // Ambil id kendaraan yang sedang aktif parkir (status masuk)
+                        $kendaraanAktif = Transaksi::where('status', 'masuk')
+                            ->pluck('id_kendaraan');
 
-        // Hanya tampilkan kendaraan yang tidak sedang parkir
-        return Kendaraan::whereNotIn('id_kendaraan', $kendaraanAktif)
-            ->get()
-            ->mapWithKeys(fn($k) => [
-                $k->id_kendaraan => $k->plat_nomor . ' - ' . $k->jenis_kendaraan . ' - ' . $k->pemilik
-            ]);
-    })
-    // ← TAMBAHAN INI: agar saat Edit label tampil dengan benar
-    ->getOptionLabelUsing(function ($value) {
-        $k = Kendaraan::find($value);
-        if (!$k) return $value;
-        return $k->plat_nomor . ' - ' . $k->jenis_kendaraan . ' - ' . $k->pemilik;
-    })
-    ->searchable()
-    ->preload()
-    ->required(),
+                        // Hanya tampilkan kendaraan yang tidak sedang parkir
+                        return Kendaraan::whereNotIn('id_kendaraan', $kendaraanAktif)
+                            ->get()
+                            ->mapWithKeys(fn($k) => [
+                                $k->id_kendaraan => $k->plat_nomor . ' - ' . $k->jenis_kendaraan . ' - ' . $k->pemilik
+                            ]);
+                    })
+                    // label tampil dengan benar
+                    ->getOptionLabelUsing(function ($value) {
+                        $k = Kendaraan::find($value);
+                        if (!$k) return $value;
+                        return $k->plat_nomor . ' - ' . $k->jenis_kendaraan . ' - ' . $k->pemilik;
+                    })
+                    ->searchable()
+                    ->preload()
+                    ->required(),
+
+
                 Select::make('id_tarif')
                     ->label('Tarif Kendaraan')
                     ->options(
@@ -56,13 +59,7 @@ class TransaksiForm
                     ->searchable()
                     ->required(),
 
-                TextInput::make('user_login')
-                    ->label('Petugas')
-                    ->default(fn() => Auth::user()->username)
-                    ->readOnly()
-                    ->dehydrated(false),
-
-                // 🔥 AREA PARKIR (SUDAH DI-UPGRADE)
+                // AREA PARKIR dengan nama area dan terisi
                 Select::make('id_area')
                     ->label('Area Parkir')
                     ->options(function () {
@@ -93,66 +90,27 @@ class TransaksiForm
                         }
                     ])
                     ->searchable()
-                    
+
                     ->required(),
+
 
                 DateTimePicker::make('waktu_masuk')
                     ->label('Waktu Masuk')
-                    ->readOnly(),
+                    ->default(now())
+                    ->disabled(),
 
-                DateTimePicker::make('waktu_keluar')
-                    ->label('Waktu Keluar')
-                    ->readOnly(),
+                Hidden::make('waktu_keluar')
+                   ->nullable(),
 
-                TextInput::make('durasi_jam')
-                    ->label('Durasi (Jam)')
-                    ->numeric()
-                    ->readOnly(),
+                Hidden::make('durasi_jam')
+                ->nullable(),
 
-                TextInput::make('biaya_total')
-                    ->label('Biaya Total')
-                    ->numeric()
-                    ->prefix('Rp')
-                    ->readOnly(),
+                Hidden::make('biaya_total')
+                ->nullable(),
 
-                Select::make('status')
-                    ->options([
-                        'masuk' => 'Masuk',
-                        'keluar' => 'Keluar',
-                    ])
-                    ->reactive()
-                    ->afterStateUpdated(function ($state, callable $set, callable $get) {
+                Hidden::make('status')
+               ->default('masuk'),
 
-                        if ($state === 'masuk') {
-                            $set('waktu_masuk', now());
-                            $set('waktu_keluar', null);
-                            $set('durasi_jam', null);
-                            $set('biaya_total', null);
-                        }
-
-                        if ($state === 'keluar') {
-
-                            $waktuMasuk = $get('waktu_masuk');
-                            $waktuKeluar = now();
-
-                            $set('waktu_keluar', $waktuKeluar);
-
-                            if ($waktuMasuk) {
-                                $durasi = Carbon::parse($waktuMasuk)
-                                    ->diffInHours($waktuKeluar);
-
-                                $set('durasi_jam', $durasi);
-
-                                $tarif = TarifParkir::find($get('id_tarif'));
-
-                                if ($tarif) {
-                                    $biaya = $durasi * $tarif->tarif_per_jam;
-                                    $set('biaya_total', $biaya);
-                                }
-                            }
-                        }
-                    })
-                    ->required(),
             ]);
     }
 }
