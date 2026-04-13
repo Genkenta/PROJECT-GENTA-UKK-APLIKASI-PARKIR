@@ -68,10 +68,19 @@ class LaporanMingguan extends Page implements HasForms
 
     public function tampilkan(): void
     {
-        $validated     = $this->form->getState();
-        $this->bulan   = $validated['bulan'] ?? Carbon::now()->format('m');
-        $this->tahun   = $validated['tahun'] ?? Carbon::now()->format('Y');
-        $this->dispatch('chart-update');
+        $validated   = $this->form->getState();
+        $this->bulan = $validated['bulan'] ?? Carbon::now()->format('m');
+        $this->tahun = $validated['tahun'] ?? Carbon::now()->format('Y');
+
+        $this->data['bulan'] = $this->bulan;
+        $this->data['tahun'] = $this->tahun;
+
+        $chart = $this->getChartData();
+        $this->dispatch('chart-update',
+            labels:     $chart['labels'],
+            transaksi:  $chart['transaksi'],
+            pendapatan: $chart['pendapatan'],
+        );
     }
 
     public function setBulanIni(): void
@@ -99,30 +108,43 @@ class LaporanMingguan extends Page implements HasForms
         $tahun = (int) $this->tahun;
         $bulan = (int) $this->bulan;
 
-        $start = Carbon::create($tahun, $bulan, 1);
-        $end   = $start->copy()->endOfMonth();
+        $start = Carbon::create($tahun, $bulan, 1)->startOfDay();
+        $end   = $start->copy()->endOfMonth()->startOfDay();
 
-        $weeks = [
-            ['label' => 'Minggu 1', 'from' => $start->copy()->startOfMonth(),             'to' => $start->copy()->startOfMonth()->addDays(6)],
-            ['label' => 'Minggu 2', 'from' => $start->copy()->startOfMonth()->addDays(7), 'to' => $start->copy()->startOfMonth()->addDays(13)],
-            ['label' => 'Minggu 3', 'from' => $start->copy()->startOfMonth()->addDays(14),'to' => $start->copy()->startOfMonth()->addDays(20)],
-            ['label' => 'Minggu 4', 'from' => $start->copy()->startOfMonth()->addDays(21),'to' => $end],
+        $namaBulanPendek = [
+            1=>'Jan', 2=>'Feb',  3=>'Mar', 4=>'Apr',
+            5=>'Mei', 6=>'Jun',  7=>'Jul', 8=>'Agu',
+            9=>'Sep', 10=>'Okt', 11=>'Nov', 12=>'Des',
+        ];
+        $bln = $namaBulanPendek[$bulan];
+
+        $endDay = (int) $end->format('d');
+
+        $weekRanges = [
+            [1,  7],
+            [8,  14],
+            [15, 21],
+            [22, $endDay],
         ];
 
         $labels = $transaksi = $pendapatan = [];
 
-        foreach ($weeks as $week) {
-            $from = $week['from']->format('Y-m-d');
-            $to   = min($week['to']->format('Y-m-d'), $end->format('Y-m-d'));
+        foreach ($weekRanges as $i => $range) {
+            $fromDate = Carbon::create($tahun, $bulan, $range[0])->format('Y-m-d');
+            $toDate   = Carbon::create($tahun, $bulan, $range[1])->format('Y-m-d');
+
+            $label = 'Minggu ' . ($i + 1) . "\n"
+                   . str_pad($range[0], 2, '0', STR_PAD_LEFT) . '–'
+                   . str_pad($range[1], 2, '0', STR_PAD_LEFT) . ' ' . $bln;
 
             $row = DB::table('tb_transaksi')
                 ->where('status', 'keluar')
-                ->whereBetween(DB::raw('DATE(waktu_keluar)'), [$from, $to])
+                ->whereBetween(DB::raw('DATE(waktu_keluar)'), [$fromDate, $toDate])
                 ->selectRaw('COUNT(*) as total_transaksi, SUM(biaya_total) as total_pendapatan')
                 ->first();
 
-            $labels[]     = $week['label'];
-            $transaksi[]  = (int) ($row->total_transaksi ?? 0);
+            $labels[]     = $label;
+            $transaksi[]  = (int)   ($row->total_transaksi  ?? 0);
             $pendapatan[] = (float) ($row->total_pendapatan ?? 0);
         }
 
@@ -132,9 +154,10 @@ class LaporanMingguan extends Page implements HasForms
     public function getPeriodeLabel(): string
     {
         $namaBulan = [
-            '01'=>'Januari','02'=>'Februari','03'=>'Maret','04'=>'April',
-            '05'=>'Mei','06'=>'Juni','07'=>'Juli','08'=>'Agustus',
-            '09'=>'September','10'=>'Oktober','11'=>'November','12'=>'Desember',
+            '01'=>'Januari',  '02'=>'Februari', '03'=>'Maret',
+            '04'=>'April',    '05'=>'Mei',       '06'=>'Juni',
+            '07'=>'Juli',     '08'=>'Agustus',   '09'=>'September',
+            '10'=>'Oktober',  '11'=>'November',  '12'=>'Desember',
         ];
         return ($namaBulan[$this->bulan] ?? $this->bulan) . ' ' . $this->tahun;
     }
