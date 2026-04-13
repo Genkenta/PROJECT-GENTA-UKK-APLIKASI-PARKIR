@@ -14,7 +14,15 @@ class KendaraanForm
         return $schema
             ->components([
                 TextInput::make('plat_nomor')
-                    ->required(),
+                ->required()
+                ->unique(
+                table: 'tb_kendaraan',
+                column: 'plat_nomor',
+                ignorable: fn ($record) => $record,
+ )
+              ->validationMessages([
+              'unique' => 'Plat Nomor sudah ada, masukkan plat nomor yang lain.',
+]),
 
                 Select::make('jenis_kendaraan')
                     ->options([
