@@ -52,20 +52,22 @@
         </x-slot>
 
         <x-slot name="headerEnd">
-            <div class="flex items-center gap-4">
-                @foreach(['Minggu 1' => '#f59e0b', 'Minggu 2' => '#60a5fa', 'Minggu 3' => '#4ade80', 'Minggu 4' => '#c084fc'] as $lbl => $clr)
-                    <span class="flex items-center gap-1.5 text-xs text-gray-400">
-                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{{ $clr }}"></span>
-                        {{ $lbl }}
-                    </span>
-                @endforeach
-            </div>
+            @if ($mode === 'bulanan')
+                <div class="flex items-center gap-4">
+                    @foreach(['Minggu 1' => '#f59e0b', 'Minggu 2' => '#60a5fa', 'Minggu 3' => '#4ade80', 'Minggu 4' => '#c084fc'] as $lbl => $clr)
+                        <span class="flex items-center gap-1.5 text-xs text-gray-400">
+                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{{ $clr }}"></span>
+                            {{ $lbl }}
+                        </span>
+                    @endforeach
+                </div>
+            @endif
         </x-slot>
 
         <div style="position:relative;width:100%;height:320px">
             <canvas id="chartTransaksi"
                 role="img"
-                aria-label="Grafik transaksi per minggu">
+                aria-label="Grafik transaksi per periode">
             </canvas>
         </div>
 
@@ -85,11 +87,11 @@
     @script
     <script>
     (function () {
-        // Gunakan let agar bisa diupdate dari event
         let D = {
             labels:     @json($chart['labels'] ?? []),
             transaksi:  @json($chart['transaksi'] ?? []),
             pendapatan: @json($chart['pendapatan'] ?? []),
+            mode:       @json($mode),
         };
 
         const MINGGU_COLORS = ['#f59e0b', '#60a5fa', '#4ade80', '#c084fc'];
@@ -103,6 +105,14 @@
             if (ex) ex.destroy();
 
             if (!D.labels.length) return;
+
+            const isBulanan    = D.mode === 'bulanan';
+            const pointColors  = isBulanan
+                ? MINGGU_COLORS
+                : D.labels.map(() => '#f59e0b');
+            const pointColors2 = isBulanan
+                ? MINGGU_COLORS
+                : D.labels.map(() => '#60a5fa');
 
             const tooltipStyle = {
                 backgroundColor: dark ? 'rgba(17,24,39,0.95)' : 'rgba(255,255,255,0.95)',
@@ -124,13 +134,13 @@
                             data: D.transaksi,
                             borderColor: '#f59e0b',
                             backgroundColor: 'rgba(240,165,0,0.10)',
-                            pointBackgroundColor: MINGGU_COLORS,
-                            pointBorderColor:     MINGGU_COLORS,
-                            pointRadius: 7,
+                            pointBackgroundColor: pointColors,
+                            pointBorderColor:     pointColors,
+                            pointRadius: isBulanan ? 7 : 4,
                             pointHoverRadius: 9,
                             borderWidth: 2,
                             fill: true,
-                            tension: 0,
+                            tension: isBulanan ? 0 : 0.4,
                             yAxisID: 'yKendaraan',
                         },
                         {
@@ -138,13 +148,13 @@
                             data: D.pendapatan,
                             borderColor: '#60a5fa',
                             backgroundColor: 'rgba(96,165,250,0.08)',
-                            pointBackgroundColor: MINGGU_COLORS,
-                            pointBorderColor:     MINGGU_COLORS,
-                            pointRadius: 7,
+                            pointBackgroundColor: pointColors2,
+                            pointBorderColor:     pointColors2,
+                            pointRadius: isBulanan ? 7 : 4,
                             pointHoverRadius: 9,
                             borderWidth: 2,
                             fill: false,
-                            tension: 0,
+                            tension: isBulanan ? 0 : 0.4,
                             yAxisID: 'yPendapatan',
                         },
                     ],
@@ -181,6 +191,7 @@
                             ticks: {
                                 color: tickClr,
                                 font: { size: 11 },
+                                maxRotation: isBulanan ? 0 : 35,
                                 callback: function(val, index) {
                                     const lbl = this.getLabelForValue(val);
                                     return lbl.split('\n');
@@ -231,12 +242,12 @@
 
         draw();
 
-        // Terima data baru dari PHP setiap kali tampilkan() dipanggil
         $wire.on('chart-update', (payload) => {
             D = {
                 labels:     payload.labels     ?? [],
                 transaksi:  payload.transaksi  ?? [],
                 pendapatan: payload.pendapatan ?? [],
+                mode:       payload.mode       ?? 'bulanan',
             };
             setTimeout(draw, 80);
         });
