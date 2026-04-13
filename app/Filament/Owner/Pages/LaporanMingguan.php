@@ -6,6 +6,7 @@ use App\Models\Transaksi;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Support\Icons\Heroicon;
@@ -29,17 +30,23 @@ class LaporanMingguan extends Page implements HasForms
     public string $mode = 'bulanan';
     public string $bulan = '';
     public string $tahun = '';
+    public string $tanggal_mulai = '';
+    public string $tanggal_selesai = '';
 
     public function mount(): void
     {
-        $this->mode  = 'bulanan';
-        $this->bulan = Carbon::now()->format('m');
-        $this->tahun = Carbon::now()->format('Y');
+        $this->mode            = 'bulanan';
+        $this->bulan           = Carbon::now()->format('m');
+        $this->tahun           = Carbon::now()->format('Y');
+        $this->tanggal_mulai   = Carbon::now()->startOfMonth()->format('Y-m-d');
+        $this->tanggal_selesai = Carbon::now()->endOfMonth()->format('Y-m-d');
 
         $this->form->fill([
-            'mode'  => $this->mode,
-            'bulan' => $this->bulan,
-            'tahun' => $this->tahun,
+            'mode'            => $this->mode,
+            'bulan'           => $this->bulan,
+            'tahun'           => $this->tahun,
+            'tanggal_mulai'   => $this->tanggal_mulai,
+            'tanggal_selesai' => $this->tanggal_selesai,
         ]);
     }
 
@@ -47,6 +54,15 @@ class LaporanMingguan extends Page implements HasForms
     {
         return $form
             ->schema([
+                Select::make('mode')
+                    ->label('Tampilkan Per')
+                    ->options([
+                        'bulanan'  => 'Per Minggu (Bulanan)',
+                        'rentang'  => 'Rentang Tanggal',
+                    ])
+                    ->required()
+                    ->live(),
+
                 Select::make('bulan')
                     ->label('Bulan')
                     ->options([
@@ -54,13 +70,28 @@ class LaporanMingguan extends Page implements HasForms
                         '04' => 'April',    '05' => 'Mei',       '06' => 'Juni',
                         '07' => 'Juli',     '08' => 'Agustus',   '09' => 'September',
                         '10' => 'Oktober',  '11' => 'November',  '12' => 'Desember',
-                    ]),
+                    ])
+                    ->visible(fn ($get) => $get('mode') === 'bulanan'),
 
                 Select::make('tahun')
                     ->label('Tahun')
                     ->options(collect(range(Carbon::now()->year, Carbon::now()->year - 4))
                         ->mapWithKeys(fn ($y) => [$y => (string) $y])
-                        ->toArray()),
+                        ->toArray())
+                    ->visible(fn ($get) => $get('mode') === 'bulanan'),
+
+                DatePicker::make('tanggal_mulai')
+                    ->label('Tanggal Awal')
+                    ->native(false)
+                    ->displayFormat('d/m/Y')
+                    ->visible(fn ($get) => $get('mode') === 'rentang'),
+
+                DatePicker::make('tanggal_selesai')
+                    ->label('Tanggal Akhir')
+                    ->native(false)
+                    ->displayFormat('d/m/Y')
+                    ->afterOrEqual('tanggal_mulai')
+                    ->visible(fn ($get) => $get('mode') === 'rentang'),
             ])
             ->columns(4)
             ->statePath('data');
@@ -68,12 +99,21 @@ class LaporanMingguan extends Page implements HasForms
 
     public function tampilkan(): void
     {
-        $validated   = $this->form->getState();
-        $this->bulan = $validated['bulan'] ?? Carbon::now()->format('m');
-        $this->tahun = $validated['tahun'] ?? Carbon::now()->format('Y');
+        $validated = $this->form->getState();
 
-        $this->data['bulan'] = $this->bulan;
-        $this->data['tahun'] = $this->tahun;
+        $this->mode = $validated['mode'] ?? 'bulanan';
+
+        if ($this->mode === 'bulanan') {
+            $this->bulan = $validated['bulan'] ?? Carbon::now()->format('m');
+            $this->tahun = $validated['tahun'] ?? Carbon::now()->format('Y');
+            $this->data['bulan'] = $this->bulan;
+            $this->data['tahun'] = $this->tahun;
+        } else {
+            $this->tanggal_mulai   = $validated['tanggal_mulai']   ?? Carbon::now()->startOfMonth()->format('Y-m-d');
+            $this->tanggal_selesai = $validated['tanggal_selesai'] ?? Carbon::now()->endOfMonth()->format('Y-m-d');
+            $this->data['tanggal_mulai']   = $this->tanggal_mulai;
+            $this->data['tanggal_selesai'] = $this->tanggal_selesai;
+        }
 
         $chart = $this->getChartData();
         $this->dispatch('chart-update',
@@ -85,6 +125,7 @@ class LaporanMingguan extends Page implements HasForms
 
     public function setBulanIni(): void
     {
+        $this->data['mode']  = 'bulanan';
         $this->data['bulan'] = Carbon::now()->format('m');
         $this->data['tahun'] = Carbon::now()->format('Y');
         $this->tampilkan();
@@ -92,18 +133,37 @@ class LaporanMingguan extends Page implements HasForms
 
     public function getSummary(): ?object
     {
-        return Transaksi::query()
-            ->where('status', 'keluar')
-            ->whereYear('waktu_keluar', $this->tahun)
-            ->whereMonth('waktu_keluar', $this->bulan)
-            ->selectRaw('
-                COUNT(*) as total_transaksi,
-                SUM(biaya_total) as total_pendapatan,
-                COUNT(DISTINCT DATE(waktu_keluar)) as total_hari
-            ')->first();
+        $query = Transaksi::query()->where('status', 'keluar');
+
+        if ($this->mode === 'bulanan') {
+            $query->whereYear('waktu_keluar', $this->tahun)
+                  ->whereMonth('waktu_keluar', $this->bulan);
+        } else {
+            if ($this->tanggal_mulai && $this->tanggal_selesai) {
+                $query->whereBetween(DB::raw('DATE(waktu_keluar)'), [
+                    $this->tanggal_mulai,
+                    $this->tanggal_selesai,
+                ]);
+            }
+        }
+
+        return $query->selectRaw('
+            COUNT(*) as total_transaksi,
+            SUM(biaya_total) as total_pendapatan,
+            COUNT(DISTINCT DATE(waktu_keluar)) as total_hari
+        ')->first();
     }
 
     public function getChartData(): array
+    {
+        if ($this->mode === 'bulanan') {
+            return $this->getChartBulanan();
+        }
+
+        return $this->getChartRentang();
+    }
+
+    private function getChartBulanan(): array
     {
         $tahun = (int) $this->tahun;
         $bulan = (int) $this->bulan;
@@ -116,8 +176,7 @@ class LaporanMingguan extends Page implements HasForms
             5=>'Mei', 6=>'Jun',  7=>'Jul', 8=>'Agu',
             9=>'Sep', 10=>'Okt', 11=>'Nov', 12=>'Des',
         ];
-        $bln = $namaBulanPendek[$bulan];
-
+        $bln    = $namaBulanPendek[$bulan];
         $endDay = (int) $end->format('d');
 
         $weekRanges = [
@@ -151,8 +210,47 @@ class LaporanMingguan extends Page implements HasForms
         return compact('labels', 'transaksi', 'pendapatan');
     }
 
+    private function getChartRentang(): array
+    {
+        if (!$this->tanggal_mulai || !$this->tanggal_selesai) {
+            return ['labels' => [], 'transaksi' => [], 'pendapatan' => []];
+        }
+
+        $rows = DB::table('tb_transaksi')
+            ->where('status', 'keluar')
+            ->whereBetween(DB::raw('DATE(waktu_keluar)'), [
+                $this->tanggal_mulai,
+                $this->tanggal_selesai,
+            ])
+            ->selectRaw('DATE(waktu_keluar) as tanggal, COUNT(*) as total_transaksi, SUM(biaya_total) as total_pendapatan')
+            ->groupBy(DB::raw('DATE(waktu_keluar)'))
+            ->orderBy('tanggal')
+            ->get();
+
+        $period = Carbon::parse($this->tanggal_mulai)
+            ->daysUntil(Carbon::parse($this->tanggal_selesai)->addDay());
+
+        $map        = $rows->keyBy('tanggal');
+        $labels     = $transaksi = $pendapatan = [];
+
+        foreach ($period as $date) {
+            $key          = $date->format('Y-m-d');
+            $labels[]     = $date->format('d/m');
+            $transaksi[]  = (int)   ($map[$key]->total_transaksi  ?? 0);
+            $pendapatan[] = (float) ($map[$key]->total_pendapatan ?? 0);
+        }
+
+        return compact('labels', 'transaksi', 'pendapatan');
+    }
+
     public function getPeriodeLabel(): string
     {
+        if ($this->mode === 'rentang' && $this->tanggal_mulai && $this->tanggal_selesai) {
+            $from = Carbon::parse($this->tanggal_mulai)->format('d/m/Y');
+            $to   = Carbon::parse($this->tanggal_selesai)->format('d/m/Y');
+            return $from === $to ? $from : "$from — $to";
+        }
+
         $namaBulan = [
             '01'=>'Januari',  '02'=>'Februari', '03'=>'Maret',
             '04'=>'April',    '05'=>'Mei',       '06'=>'Juni',
